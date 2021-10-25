@@ -1,16 +1,17 @@
+use anyhow;
 use clap::{App, AppSettings, Arg};
+use kube::core::object::ObjectList;
 use kube::{
     api::{Api, DynamicObject},
     discovery, Client, ResourceExt,
 };
 
 #[tokio::main]
-async fn main() -> Result<(), kube::Error> {
+async fn main() -> anyhow::Result<()> {
     let matches = App::new("Kube tools")
         .version(env!("CARGO_PKG_VERSION"))
         .about("Utility to help apply Kube YAML")
         .setting(AppSettings::SubcommandRequiredElseHelp)
-        .setting(AppSettings::DisableVersionForSubcommands)
         .subcommand(
             App::new("apply")
                 .setting(AppSettings::ArgRequiredElseHelp)
@@ -27,30 +28,52 @@ async fn main() -> Result<(), kube::Error> {
     }
 
     let client = Client::try_default().await?;
-    get_api_services(client.clone(), "ais-sre.apple.com");
-    get_configmaps(client.clone(), "");
+    let api_services = get_api_services(client.clone(), "ais-sre.apple.com").await?;
+    let configmaps = get_configmaps(client.clone(), "").await?;
+
+    /*
+    let narrarive_issuer = if api_services.len() > 0 {
+        api_services.get(0);
+    } else {
+        kube::Error::
+    }
+     */
 
     Ok(())
 }
 
-async fn get_api_services(client: Client, apigroup: &str) -> Result<(), kube::Error> {
+async fn get_k8s_resources(
+    client: Client,
+    apigroup: &str,
+    kind: &str,
+) -> Result<ObjectList<DynamicObject>, kube::Error> {
     let apigroup = discovery::group(&client, apigroup).await?;
-    let (ar, caps) = apigroup.recommended_kind("NarrativeIssuer").unwrap();
+    let (ar, caps) = apigroup.recommended_kind(kind).unwrap();
     let api: Api<DynamicObject> = Api::all_with(client.clone(), &ar);
-    for service in api.list(&Default::default()).await? {
+    let services = api.list(&Default::default()).await?;
+
+    Ok(services)
+}
+
+async fn get_api_services(
+    client: Client,
+    apigroup: &str,
+) -> Result<Vec<DynamicObject>, kube::Error> {
+    let services = get_k8s_resources(client, apigroup, "NarrativeIssuer").await?;
+
+    for service in &services {
         println!("Found APIService: {}", service.name());
     }
 
-    Ok(())
+    Ok(services.items)
 }
 
-async fn get_configmaps(client: Client, apigroup: &str) -> Result<(), kube::Error> {
-    let apigroup = discovery::group(&client, apigroup).await?;
-    let (ar, caps) = apigroup.recommended_kind("ConfigMap").unwrap();
-    let api: Api<DynamicObject> = Api::all_with(client.clone(), &ar);
-    for service in api.list(&Default::default()).await? {
+async fn get_configmaps(client: Client, apigroup: &str) -> Result<Vec<DynamicObject>, kube::Error> {
+    let services = get_k8s_resources(client, apigroup, "ConfigMap").await?;
+
+    for service in &services {
         println!("ConfigMap: {}", service.name());
     }
 
-    Ok(())
+    Ok(services.items)
 }
